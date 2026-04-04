@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: vox-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:10000
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: MODEL_URL
+        value: "" # Fill this in with the deployed model URL if needed
+      - key: TRUSTED_ORIGINS
+        value: "https://your-app.vercel.app,http://localhost:8080"

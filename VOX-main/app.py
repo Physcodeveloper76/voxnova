@@ -33,6 +33,7 @@ trusted_origins = [
     "http://localhost:8080",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
+    "https://your-app.vercel.app",
 ]
 
 # Allow optional extra trusted origins from environment variable:
@@ -83,6 +84,28 @@ def play_audio_locally(filepath):
 translator = Translator()
 
 # -----------------------------
+# Download models if missing
+# -----------------------------
+import urllib.request
+
+model_url = os.environ.get("MODEL_URL")
+if model_url and not os.path.exists(MODEL_PATH):
+    try:
+        print("Downloading sign_language_model.pkl...")
+        dl_url = model_url if model_url.endswith(".pkl") else model_url.rstrip("/") + "/sign_language_model.pkl"
+        urllib.request.urlretrieve(dl_url, MODEL_PATH)
+    except Exception as e:
+        print(f"Failed to download model: {e}")
+
+if model_url and not os.path.exists(DICTIONARY_PATH):
+    try:
+        print("Downloading word_dictionary.pkl...")
+        dl_url = model_url.replace("sign_language_model.pkl", "word_dictionary.pkl") if model_url.endswith(".pkl") else model_url.rstrip("/") + "/word_dictionary.pkl"
+        urllib.request.urlretrieve(dl_url, DICTIONARY_PATH)
+    except Exception as e:
+        print(f"Failed to download dictionary: {e}")
+
+# -----------------------------
 # Load model and dictionary
 # -----------------------------
 try:
@@ -110,6 +133,10 @@ hands = mp_hands.Hands(
 @app.route("/")
 def index_page():
     return render_template("index.html")
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "ok"})
 
 
 @app.route("/home")

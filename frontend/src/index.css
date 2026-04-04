@@ -1,0 +1,175 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ─── Dark Mode (default) ─────────────────────────────────────────────────
+     Palette: Deep navy background, cobalt-to-teal gradient as primary,
+     gold accent. Represents deaf/mute awareness (international deaf blue)
+     and the beauty of visual communication.
+  ──────────────────────────────────────────────────────────────────────────── */
+  :root {
+    --background: 224 45% 4%;
+    --foreground: 210 25% 94%;
+
+    --card: 224 45% 6%;
+    --card-foreground: 210 25% 94%;
+
+    --popover: 224 45% 6%;
+    --popover-foreground: 210 25% 94%;
+
+    /* Cobalt blue — international deaf awareness colour */
+    --primary: 207 90% 54%;
+    --primary-foreground: 224 45% 4%;
+
+    --secondary: 224 40% 11%;
+    --secondary-foreground: 210 25% 94%;
+
+    --muted: 224 28% 14%;
+    --muted-foreground: 215 18% 56%;
+
+    /* Gold accent — breaking-through-silence moment */
+    --accent: 43 95% 52%;
+    --accent-foreground: 224 45% 4%;
+
+    --destructive: 0 82% 60%;
+    --destructive-foreground: 210 25% 94%;
+
+    --border: 224 25% 17%;
+    --input: 224 25% 17%;
+    --ring: 207 90% 54%;
+
+    --radius: 0.75rem;
+
+    /* ── Custom wave token family ─────────────────────────────────── */
+    --wave-deep:   224 45% 4%;
+    --wave-navy:   224 45% 9%;
+    --wave-cobalt: 207 90% 54%;
+    --wave-teal:   185 80% 48%;
+    --wave-gold:   43 95% 52%;
+    --wave-light:  210 25% 94%;
+
+    /* ── Gradient, shadow, glow ───────────────────────────────────── */
+    --gradient-wave: linear-gradient(135deg, hsl(207, 90%, 54%), hsl(185, 80%, 48%));
+    --gradient-wave-subtle: linear-gradient(135deg, hsl(207, 90%, 54%, 0.14), hsl(185, 80%, 48%, 0.07));
+    --shadow-wave: 0 8px 32px -8px hsl(207, 90%, 54%, 0.38);
+    --shadow-card: 0 4px 24px -4px hsl(0, 0%, 0%, 0.45);
+
+    /* Sidebar */
+    --sidebar-background: 224 45% 6%;
+    --sidebar-foreground: 210 25% 94%;
+    --sidebar-primary: 207 90% 54%;
+    --sidebar-primary-foreground: 224 45% 4%;
+    --sidebar-accent: 224 28% 14%;
+    --sidebar-accent-foreground: 210 25% 94%;
+    --sidebar-border: 224 25% 17%;
+    --sidebar-ring: 207 90% 54%;
+  }
+
+  /* ─── Light Mode ──────────────────────────────────────────────────────────
+     Soft sky-white background, deep sapphire text, cobalt primary.
+  ──────────────────────────────────────────────────────────────────────────── */
+  .light {
+    --background: 210 40% 97%;
+    --foreground: 224 40% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 40% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 40% 12%;
+
+    --primary: 207 85% 42%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 28% 91%;
+    --secondary-foreground: 224 40% 12%;
+
+    --muted: 210 22% 87%;
+    --muted-foreground: 220 16% 48%;
+
+    --accent: 43 92% 46%;
+    --accent-foreground: 224 40% 12%;
+
+    --destructive: 0 70% 44%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 18% 82%;
+    --input: 210 18% 82%;
+    --ring: 207 85% 42%;
+
+    --wave-deep:   210 40% 97%;
+    --wave-navy:   210 28% 91%;
+    --wave-cobalt: 207 85% 42%;
+    --wave-teal:   185 72% 38%;
+    --wave-gold:   43 92% 46%;
+    --wave-light:  224 40% 12%;
+
+    --gradient-wave: linear-gradient(135deg, hsl(207, 85%, 42%), hsl(185, 72%, 38%));
+    --gradient-wave-subtle: linear-gradient(135deg, hsl(207, 85%, 42%, 0.11), hsl(185, 72%, 38%, 0.06));
+    --shadow-wave: 0 8px 32px -8px hsl(207, 85%, 42%, 0.28);
+    --shadow-card: 0 4px 24px -4px hsl(0, 0%, 0%, 0.07);
+
+    --sidebar-background: 210 25% 93%;
+    --sidebar-foreground: 224 40% 12%;
+    --sidebar-primary: 207 85% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 22% 87%;
+    --sidebar-accent-foreground: 224 40% 12%;
+    --sidebar-border: 210 18% 82%;
+    --sidebar-ring: 207 85% 42%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    transition: background-color 0.25s ease, border-color 0.25s ease, color 0.2s ease, box-shadow 0.25s ease;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+  /* Prevent transition flicker on icons */
+  svg, svg * {
+    transition: none !important;
+  }
+}
+
+@layer utilities {
+  /* ── Primary gradient (cobalt -> teal) ─────────────────────────────── */
+  .gradient-wave { background: var(--gradient-wave); }
+  .gradient-wave-subtle { background: var(--gradient-wave-subtle); }
+  .gradient-ember { background: var(--gradient-wave); }
+  .gradient-ember-subtle { background: var(--gradient-wave-subtle); }
+
+  /* ── Shadows / glows ───────────────────────────────────────────────── */
+  .shadow-wave { box-shadow: var(--shadow-wave); }
+  .shadow-ember { box-shadow: var(--shadow-wave); }
+  .shadow-card { box-shadow: var(--shadow-card); }
+
+  .glow-wave {
+    box-shadow: 0 0 48px hsl(207, 90%, 54%, 0.20), 0 0 96px hsl(185, 80%, 48%, 0.10);
+  }
+  .glow-ember {
+    box-shadow: 0 0 48px hsl(207, 90%, 54%, 0.20), 0 0 96px hsl(185, 80%, 48%, 0.10);
+  }
+  .light .glow-ember {
+    box-shadow: 0 0 40px hsl(207, 85%, 42%, 0.12), 0 0 80px hsl(185, 72%, 38%, 0.06);
+  }
+
+  /* ── Text gradient ─────────────────────────────────────────────────── */
+  .text-gradient-wave,
+  .text-gradient-ember {
+    background: var(--gradient-wave);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+/* Sun/moon removed — no celestial animation CSS needed */

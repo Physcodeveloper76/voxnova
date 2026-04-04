@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign — portable demo</title>
+  <style>
+    :root {
+      --background: hsl(20, 30%, 4%);
+      --card: hsl(24, 35%, 6%);
+      --primary: hsl(25, 95%, 53%);
+      --accent: hsl(45, 97%, 56%);
+      --foreground: hsl(210, 40%, 96%);
+      --muted: hsl(24, 20%, 12%);
+      --muted-foreground: hsl(210, 15%, 55%);
+      --border: hsl(24, 20%, 15%);
+      --input: hsl(24, 20%, 15%);
+      --destructive: hsl(0, 84%, 60%);
+
+      --ember-deep: hsl(20, 30%, 4%);
+      --ember-brown: hsl(27, 40%, 7%);
+      --ember-orange: hsl(25, 95%, 53%);
+      --ember-light-orange: hsl(27, 96%, 61%);
+      --ember-amber: hsl(45, 97%, 56%);
+      --ember-slate: hsl(210, 40%, 96%);
+      --gradient-ember: linear-gradient(
+        135deg,
+        hsl(25, 95%, 53%),
+        hsl(45, 97%, 56%)
+      );
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: var(--background);
+      color: var(--foreground);
+    }
+    h1 {
+      font-size: 1.25rem;
+      margin: 0 0 12px;
+      color: var(--foreground);
+    }
+    #canvas {
+      width: 100%;
+      max-width: 900px;
+      height: min(70vh, 560px);
+      background: radial-gradient(circle at top, var(--muted), var(--ember-deep));
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+    input[type="text"],
+    input[type="number"] {
+      min-width: 120px;
+      padding: 8px 12px;
+      border: 1px solid var(--input);
+      border-radius: 6px;
+      background: var(--card);
+      color: var(--foreground);
+    }
+    #text { flex: 1; min-width: 200px; }
+    .speed-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--muted-foreground);
+      font-size: 0.9rem;
+    }
+    input[type="range"] {
+      accent-color: var(--ember-orange);
+      width: 160px;
+    }
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      background: var(--gradient-ember);
+      color: var(--ember-deep);
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.05); }
+    #status { margin-top: 8px; color: var(--foreground); min-height: 1.5em; }
+    .hint { font-size: 0.85rem; color: var(--muted-foreground); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>3D signing — type A–Z</h1>
+  <div id="canvas"></div>
+  <div class="row">
+    <input id="text" type="text" placeholder="Type letters (e.g. HELLO)" autocomplete="off" />
+    <label class="speed-wrap" for="speed">
+      Speed
+      <input id="speed" type="range" min="0.03" max="0.3" step="0.01" value="0.1" />
+      <input id="speedValue" type="number" min="0.03" max="0.3" step="0.01" value="0.1" />
+    </label>
+    <button type="button" id="go">Sign</button>
+  </div>
+  <div id="status"></div>
+  <p class="hint">Serve this folder over HTTP (e.g. <code>npx serve signing-portable</code> or your app’s static server). Opening <code>index.html</code> as <code>file://</code> may block loading the GLB.</p>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.136.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.136.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+    window.THREE = THREE;
+    window.GLTFLoader = GLTFLoader;
+
+    await import("./signing-core.js");
+
+    const ref = SigningCore.loadCharacter("canvas", {
+      modelUrl: "models/ybot.glb",
+      speed: 0.1,
+      pauseMs: 800,
+    });
+
+    const status = document.getElementById("status");
+    const speed = document.getElementById("speed");
+    const speedValue = document.getElementById("speedValue");
+
+    const clampSpeed = (value) => {
+      const n = Number.parseFloat(value);
+      if (Number.isNaN(n)) return 0.1;
+      return Math.min(0.3, Math.max(0.03, n));
+    };
+
+    const setSpeed = (value) => {
+      const next = clampSpeed(value);
+      const shown = next.toFixed(2);
+      speed.value = shown;
+      speedValue.value = shown;
+      ref.speed = next;
+    };
+
+    speed.addEventListener("input", (e) => setSpeed(e.target.value));
+    speedValue.addEventListener("input", (e) => setSpeed(e.target.value));
+
+    const textInput = document.getElementById("text");
+    const runSign = () => {
+      const t = document.getElementById("text").value;
+      setSpeed(speed.value);
+      status.textContent = `Signing… (speed ${ref.speed.toFixed(2)})`;
+      SigningCore.playText(ref, t, (ch) => {
+        if (ch === null) {
+          status.textContent += " Done.";
+          return;
+        }
+        status.textContent = "Current: " + ch;
+      });
+    };
+    document.getElementById("go").onclick = runSign;
+
+    const params = new URLSearchParams(window.location.search);
+    const initialText = (params.get("text") || "").toUpperCase().replace(/[^A-Z ]/g, "");
+    if (initialText) {
+      textInput.value = initialText;
+      setTimeout(runSign, 200);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: vox-backend
+    env: python
+    buildCommand: "cd VOX-main && pip install -r requirements.txt && pip uninstall -y opencv-python opencv-contrib-python && pip install opencv-python-headless gunicorn"
+    startCommand: "cd VOX-main && gunicorn app:app -b 0.0.0.0:$PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: TRUSTED_ORIGINS
+        fromService:
+          type: web
+          name: vox-frontend
+          envVar: RENDER_EXTERNAL_URL
+
+  - type: web
+    name: vox-frontend
+    env: static
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: "./frontend/dist"
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: vox-backend
+          envVar: RENDER_EXTERNAL_URL

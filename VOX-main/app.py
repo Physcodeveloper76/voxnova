@@ -12,6 +12,7 @@ from gtts import gTTS
 import time
 import os
 import threading
+from collections import deque
 from playsound import playsound
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -128,6 +129,48 @@ hands = mp_hands.Hands(
 )
 
 # -----------------------------
+# Session state (in-memory)
+# Buffer config constants
+# -----------------------------
+BUFFER_SIZE = 10          # rolling window of last N raw predictions
+COMMIT_THRESHOLD = 7      # min votes in window to commit a word
+WORD_GAP_SECONDS = 1.5   # no-hand gap → word boundary (reset buffer)
+SENTENCE_END_SECONDS = 4.0  # no-hand gap → sentence finalised
+
+# sessions dict: keyed by session_id string
+# Each value is a dict with: prediction_buffer, committed_words,
+#   last_commit_time, last_hand_seen_time, finalized
+sessions: dict = {}
+sessions_lock = threading.Lock()
+
+
+def _get_session(session_id: str) -> dict:
+    """Return existing session state or create a fresh one."""
+    with sessions_lock:
+        if session_id not in sessions:
+            sessions[session_id] = {
+                "prediction_buffer": deque(maxlen=BUFFER_SIZE),
+                "committed_words": [],
+                "last_commit_time": time.time(),
+                "last_hand_seen_time": time.time(),
+                "finalized": False,
+            }
+        return sessions[session_id]
+
+
+def _reset_session(session_id: str) -> None:
+    """Wipe and re-initialise a session."""
+    with sessions_lock:
+        sessions[session_id] = {
+            "prediction_buffer": deque(maxlen=BUFFER_SIZE),
+            "committed_words": [],
+            "last_commit_time": time.time(),
+            "last_hand_seen_time": time.time(),
+            "finalized": False,
+        }
+
+
+# -----------------------------
 # ROUTES
 # -----------------------------
 @app.route("/")
@@ -191,7 +234,7 @@ def dataset_summary():
     })
 
 # -----------------------------
-# SIGN → TEXT
+# SIGN → TEXT  (upgraded)
 # -----------------------------
 @app.route("/sign_to_text", methods=["POST"])
 def sign_to_text():
@@ -201,6 +244,13 @@ def sign_to_text():
     if "frame" not in request.files:
         return jsonify({"error": "No frame uploaded"}), 400
 
+    # ── session id ─────────────────────────────────────────────────
+    session_id = request.form.get("session_id", "default")
+    session = _get_session(session_id)
+
+    now = time.time()
+
+    # ── decode frame ───────────────────────────────────────────────
     file = request.files["frame"]
     file_bytes = np.frombuffer(file.read(), np.uint8)
     frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
@@ -211,18 +261,157 @@ def sign_to_text():
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = hands.process(frame_rgb)
 
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            landmarks = []
-            for lm in hand_landmarks.landmark:
-                landmarks.extend([lm.x, lm.y, lm.z])
+    hand_detected = bool(results.multi_hand_landmarks)
 
-            if len(landmarks) == 63:
-                prediction = model.predict([landmarks])
-                predicted_word = inverted_word_dict.get(prediction[0], "Unknown")
-                return jsonify({"word": predicted_word})
+    # ── gap / boundary detection ────────────────────────────────────
+    if not hand_detected:
+        time_since_hand = now - session["last_hand_seen_time"]
 
-    return jsonify({"word": "No sign detected"})
+        if time_since_hand >= SENTENCE_END_SECONDS and not session["finalized"]:
+            # Sentence end — finalise if we have words
+            if session["committed_words"]:
+                session["finalized"] = True
+            # Reset buffer so we can detect a new sign if user continues
+            session["prediction_buffer"].clear()
+
+        elif time_since_hand >= WORD_GAP_SECONDS:
+            # Word boundary — just reset the buffer
+            session["prediction_buffer"].clear()
+
+        committed = list(session["committed_words"])
+        sentence = " ".join(committed)
+        return jsonify({
+            "current_prediction": None,
+            "committed_words": committed,
+            "sentence": sentence,
+            "finalized": session["finalized"],
+            "hand_detected": False,
+        })
+
+    # ── hand visible: update timestamp ─────────────────────────────
+    session["last_hand_seen_time"] = now
+
+    # If we were finalized but the user starts signing again, auto-clear
+    if session["finalized"]:
+        _reset_session(session_id)
+        session = _get_session(session_id)
+        session["last_hand_seen_time"] = now
+
+    # ── run classifier on first detected hand ──────────────────────
+    predicted_word = None
+    for hand_landmarks in results.multi_hand_landmarks:
+        landmarks = []
+        for lm in hand_landmarks.landmark:
+            landmarks.extend([lm.x, lm.y, lm.z])
+
+        if len(landmarks) == 63:
+            prediction = model.predict([landmarks])
+            predicted_word = inverted_word_dict.get(prediction[0], "Unknown")
+        break  # use only the first detected hand
+
+    current_prediction = predicted_word
+
+    # ── stability / majority-vote buffer ──────────────────────────
+    if predicted_word:
+        buf = session["prediction_buffer"]
+        buf.append(predicted_word)
+
+        # Count votes for each label in the current window
+        vote_counts: dict = {}
+        for w in buf:
+            vote_counts[w] = vote_counts.get(w, 0) + 1
+
+        top_word = max(vote_counts, key=vote_counts.get)
+        top_votes = vote_counts[top_word]
+
+        # Commit only when the window is full and threshold is met
+        if len(buf) == BUFFER_SIZE and top_votes >= COMMIT_THRESHOLD:
+            last_committed = session["committed_words"][-1] if session["committed_words"] else None
+            # Duplicate suppression: don't commit the same word twice in a row
+            if top_word != last_committed:
+                session["committed_words"].append(top_word)
+                session["last_commit_time"] = now
+            # Always reset buffer after a commit decision (word accepted or suppressed)
+            buf.clear()
+
+    committed = list(session["committed_words"])
+    sentence = " ".join(committed)
+
+    return jsonify({
+        "current_prediction": current_prediction,
+        "committed_words": committed,
+        "sentence": sentence,
+        "finalized": session["finalized"],
+        "hand_detected": True,
+    })
+
+
+# ── Force-commit current top prediction ────────────────────────────────────
+@app.route("/commit_word", methods=["POST"])
+def commit_word():
+    """
+    Manually commit whichever word has the most votes in the current buffer.
+    Body: { "session_id": "..." }
+    """
+    data = request.json or {}
+    session_id = data.get("session_id", "default")
+    session = _get_session(session_id)
+
+    buf = session["prediction_buffer"]
+    committed = False
+    word_committed = None
+
+    if buf:
+        vote_counts: dict = {}
+        for w in buf:
+            vote_counts[w] = vote_counts.get(w, 0) + 1
+        top_word = max(vote_counts, key=vote_counts.get)
+        last_committed = session["committed_words"][-1] if session["committed_words"] else None
+        if top_word != last_committed:
+            session["committed_words"].append(top_word)
+            session["last_commit_time"] = time.time()
+            word_committed = top_word
+            committed = True
+        buf.clear()
+
+    committed_list = list(session["committed_words"])
+    return jsonify({
+        "committed": committed,
+        "word_committed": word_committed,
+        "committed_words": committed_list,
+        "sentence": " ".join(committed_list),
+        "finalized": session["finalized"],
+    })
+
+
+# ── Get current sentence state ──────────────────────────────────────────────
+@app.route("/get_sentence", methods=["GET"])
+def get_sentence():
+    """
+    GET /get_sentence?session_id=<id>
+    Returns { "words": [...], "sentence": "...", "finalized": bool }
+    """
+    session_id = request.args.get("session_id", "default")
+    session = _get_session(session_id)
+    committed = list(session["committed_words"])
+    return jsonify({
+        "words": committed,
+        "sentence": " ".join(committed),
+        "finalized": session["finalized"],
+    })
+
+
+# ── Clear / reset a session ─────────────────────────────────────────────────
+@app.route("/clear_sentence", methods=["POST"])
+def clear_sentence():
+    """
+    POST /clear_sentence  Body: { "session_id": "..." }
+    Resets the full session state for a fresh sentence.
+    """
+    data = request.json or {}
+    session_id = data.get("session_id", "default")
+    _reset_session(session_id)
+    return jsonify({"status": "cleared", "session_id": session_id})
 
 
 # =====================================================

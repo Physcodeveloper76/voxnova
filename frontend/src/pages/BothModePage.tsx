@@ -1,15 +1,23 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Mic, MicOff, Send, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-import { deafTextToVoice, signToText } from "@/lib/api";
+import {
+  deafTextToVoice,
+  signToText,
+  commitWord,
+  clearSentence,
+  resolveAudioUrl,
+  type SignToTextResponse,
+} from "@/lib/api";
 import { useDatasetSummary } from "@/hooks/useDatasetSummary";
 import AudioPlayer from "@/components/AudioPlayer";
 import CameraCapture from "@/components/CameraCapture";
 import DatasetPanel from "@/components/DatasetPanel";
 import ErrorBanner from "@/components/ErrorBanner";
 import ISLSignerEmbed from "@/components/ISLSignerEmbed";
+import SentenceDisplay from "@/components/SentenceDisplay";
 import { useLanguage } from "@/hooks/useLanguage";
 
 const LANGUAGES = [
@@ -17,6 +25,13 @@ const LANGUAGES = [
   { code: "hi" as const, label: "हि" },
   { code: "mr" as const, label: "म"  },
 ];
+
+function generateSessionId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 export default function BothModePage() {
   const { t } = useLanguage();
@@ -28,10 +43,20 @@ export default function BothModePage() {
   const [translated, setTranslated] = useState<string | null>(null);
   const [ttsLoading, setTtsLoading] = useState(false);
   const [error, setError]         = useState<string | null>(null);
-  const [word, setWord]           = useState<string | null>(null);
   const [signLoading, setSignLoading] = useState(false);
   const { data: dataset }         = useDatasetSummary();
   const modelLoaded               = dataset?.model_loaded ?? false;
+
+  // Sign sentence state
+  const sessionIdRef = useRef<string>(generateSessionId());
+  const sessionId = sessionIdRef.current;
+  const [signState, setSignState] = useState<SignToTextResponse>({
+    current_prediction: null,
+    committed_words: [],
+    sentence: "",
+    finalized: false,
+    hand_detected: false,
+  });
 
   const handleTTS = async () => {
     const text = ttsText.trim();
@@ -40,7 +65,7 @@ export default function BothModePage() {
     setError(null);
     try {
       const result = await deafTextToVoice(text, language);
-      setAudioUrl(result.audio_url);
+      setAudioUrl(resolveAudioUrl(result.audio_url));
       setTranslated(result.translated);
     } catch (e: any) {
       setError(e.message);
@@ -53,14 +78,61 @@ export default function BothModePage() {
     if (!modelLoaded) return;
     setSignLoading(true);
     try {
-      const result = await signToText(blob);
-      setWord(result.word);
+      const result = await signToText(blob, sessionId);
+      setSignState(result);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setSignLoading(false);
     }
-  }, [modelLoaded]);
+  }, [modelLoaded, sessionId]);
+
+  const handleCommitWord = useCallback(async () => {
+    try {
+      const result = await commitWord(sessionId);
+      setSignState((prev) => ({
+        ...prev,
+        committed_words: result.committed_words,
+        sentence: result.sentence,
+        finalized: result.finalized,
+      }));
+    } catch (e: any) {
+      setError(e.message || "Commit failed");
+    }
+  }, [sessionId]);
+
+  const handleClearSign = useCallback(async () => {
+    try {
+      await clearSentence(sessionId);
+      setSignState({
+        current_prediction: null,
+        committed_words: [],
+        sentence: "",
+        finalized: false,
+        hand_detected: false,
+      });
+    } catch (e: any) {
+      setError(e.message || "Clear failed");
+    }
+  }, [sessionId]);
+
+  const handleSpeakSign = useCallback(async () => {
+    const text = signState.sentence.trim();
+    if (!text) return;
+    setTtsLoading(true);
+    try {
+      const result = await deafTextToVoice(text, "en");
+      setAudioUrl(resolveAudioUrl(result.audio_url));
+    } catch (e: any) {
+      setError(e.message || "Speech failed");
+    } finally {
+      setTtsLoading(false);
+    }
+  }, [signState.sentence]);
+
+  useEffect(() => {
+    return () => { clearSentence(sessionId).catch(() => {}); };
+  }, [sessionId]);
 
   return (
     <div className="min-h-screen pt-16">
@@ -162,31 +234,34 @@ export default function BothModePage() {
             </motion.div>
           </div>
 
-          {/* Right: Sign Recognition */}
+          {/* Right: Sign Recognition with sentence builder */}
           <div className="space-y-6">
             <motion.div
               initial={{ opacity: 0, x: 16 }}
               animate={{ opacity: 1, x: 0 }}
-              className="rounded-xl border border-border bg-card p-6 space-y-4"
+              className="rounded-xl border border-border bg-card p-6 space-y-5"
             >
               <h2 className="font-display text-lg font-semibold text-foreground">{t("both_sign_title")}</h2>
               {!modelLoaded && (
                 <p className="text-sm text-ember-amber">{t("both_model_offline")}</p>
               )}
-              <CameraCapture onFrame={handleFrame} disabled={!modelLoaded} />
-              <div className="rounded-lg border border-border bg-secondary p-4 text-center">
-                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                  {t("both_recognized_label")}
-                </p>
-                <div className="flex items-center justify-center gap-2">
-                  {signLoading && <Loader2 size={14} className="animate-spin text-primary" />}
-                  <p className="font-display text-2xl font-bold text-gradient-ember">{word || "—"}</p>
-                </div>
-              </div>
+              <CameraCapture onFrame={handleFrame} disabled={!modelLoaded} intervalMs={600} />
+
+              <SentenceDisplay
+                currentPrediction={signState.current_prediction}
+                sentence={signState.sentence}
+                committedWords={signState.committed_words}
+                handDetected={signState.hand_detected}
+                finalized={signState.finalized}
+                loading={signLoading}
+                onSpeak={handleSpeakSign}
+                onClear={handleClearSign}
+                onCommitWord={handleCommitWord}
+              />
             </motion.div>
 
             <DatasetPanel />
-            <ISLSignerEmbed text={ttsText || transcript || word || ""} />
+            <ISLSignerEmbed text={ttsText || transcript || signState.sentence || ""} />
           </div>
         </div>
       </div>
